@@ -1,20 +1,20 @@
 // File: MainActivity.kt
-package com.example.studygoalapp
+// Package: com.example.studygoalapp
 
-import android.media.RingtoneManager
+package com.example.myapplication
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,154 +23,190 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-// 데이터 클래스
-data class Subject(val name: String, val durationSec: Long)
-
 class MainActivity : ComponentActivity() {
-    private val vm by viewModels<SubjectViewModel>()
+    private val vm by viewModels<StudyViewModel>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            SubjectTimerApp(vm)
+            StudyApp(vm = vm)
         }
     }
 }
 
-class SubjectViewModel : ViewModel() {
-    var subjects = mutableStateListOf<Subject>()
-    var currentIndex by mutableStateOf(0)
-    var remainingSec by mutableStateOf(0L)
-    var isRunning by mutableStateOf(false)
-    var isPreparing by mutableStateOf(false)
-    var playSoundEvent by mutableStateOf(false)
+class StudyViewModel : ViewModel() {
+    private val _isRunning = mutableStateOf(false)
+    val isRunning: State<Boolean> = _isRunning
+
+    private val _isFocused = mutableStateOf(false)
+    val isFocused: State<Boolean> = _isFocused
+
+    private val _totalSeconds = mutableStateOf(0L)
+    val totalSeconds: State<Long> = _totalSeconds
+
+    private val _focusedSeconds = mutableStateOf(0L)
+    val focusedSeconds: State<Long> = _focusedSeconds
+
+    private val _goalSeconds = mutableStateOf(2L * 60L * 60L)
+    val goalSeconds: State<Long> = _goalSeconds
 
     private var tickerJob: Job? = null
-    private val prepareTimeSec = 10L
 
-    fun addSubject(name: String, minutes: Long) {
-        subjects.add(Subject(name, minutes * 60))
+    fun setGoalMinutes(min: Long) {
+        _goalSeconds.value = maxOf(0L, min * 60L)
     }
 
-    fun startTimer() {
-        if (isRunning || subjects.isEmpty() || currentIndex >= subjects.size) return
-        isRunning = true
-        if (remainingSec == 0L) remainingSec = subjects[currentIndex].durationSec
+    fun start() {
+        if (_isRunning.value) return
+        _isRunning.value = true
         tickerJob = viewModelScope.launch {
-            while (isActive && isRunning) {
+            while (isActive && _isRunning.value) {
                 delay(1000L)
-                if (remainingSec > 0) {
-                    remainingSec--
-                } else {
-                    playSoundEvent = true
-                    nextSubject()
-                }
+                _totalSeconds.value += 1L
+                if (_isFocused.value) _focusedSeconds.value += 1L
             }
         }
     }
 
-    fun pauseTimer() {
-        isRunning = false
+    fun pause() {
+        _isRunning.value = false
         tickerJob?.cancel()
+        tickerJob = null
     }
 
-    fun stopTimer() {
-        isRunning = false
-        tickerJob?.cancel()
-        remainingSec = 0L
+    fun toggleRunning() {
+        if (_isRunning.value) pause() else start()
     }
 
-    fun nextSubject() {
-        isRunning = false
-        tickerJob?.cancel()
-        isPreparing = true
-        viewModelScope.launch {
-            var prepSec = prepareTimeSec
-            while (prepSec > 0) {
-                delay(1000L)
-                prepSec--
-            }
-            isPreparing = false
-            currentIndex++
-            if (currentIndex < subjects.size) {
-                remainingSec = subjects[currentIndex].durationSec
-                startTimer()
+    fun toggleFocus() {
+        _isFocused.value = !_isFocused.value
+    }
+
+    fun reset() {
+        pause()
+        _isFocused.value = false
+        _totalSeconds.value = 0L
+        _focusedSeconds.value = 0L
+    }
+}
+
+@Composable
+fun StudyApp(vm: StudyViewModel) {
+    val isRunning by vm.isRunning
+    val isFocused by vm.isFocused
+    val totalSec by vm.totalSeconds
+    val focSec by vm.focusedSeconds
+    val goalSec by vm.goalSeconds
+
+    MaterialTheme {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("공부 목표 관리", style = MaterialTheme.typography.headlineSmall)
+
+                GoalInput(currentGoalSec = goalSec, onSetGoalMin = { min -> vm.setGoalMinutes(min) })
+
+                TimeInfoSection(totalSec = totalSec, focusedSec = focSec)
+
+                ProgressSection(focusedSec = focSec, goalSec = goalSec)
+
+                ControlButtons(
+                    isRunning = isRunning,
+                    isFocused = isFocused,
+                    onStartPause = { vm.toggleRunning() },
+                    onToggleFocus = { vm.toggleFocus() },
+                    onReset = { vm.reset() }
+                )
+
+                SuggestionBox(focusedSec = focSec, goalSec = goalSec)
+
+                Spacer(modifier = Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-fun SubjectTimerApp(vm: SubjectViewModel) {
-    val context = LocalContext.current
-    var name by remember { mutableStateOf("") }
-    var minutes by remember { mutableStateOf(0L) }
+fun GoalInput(currentGoalSec: Long, onSetGoalMin: (Long) -> Unit) {
+    var text by remember { mutableStateOf((currentGoalSec / 60L).toString()) }
 
-    LaunchedEffect(vm.playSoundEvent) {
-        if (vm.playSoundEvent) {
-            val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            val r = RingtoneManager.getRingtone(context, notification)
-            r.play()
-            vm.playSoundEvent = false
-        }
-    }
-
-    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("과목 타이머")
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("과목 이름") },
-                modifier = Modifier.weight(2f)
-            )
-            OutlinedTextField(
-                value = if (minutes == 0L) "" else minutes.toString(),
-                onValueChange = { minutes = it.toLongOrNull() ?: 0L },
-                label = { Text("시간(분)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f)
-            )
-            Button(onClick = {
-                if (name.isNotBlank() && minutes > 0) {
-                    vm.addSubject(name, minutes)
-                    name = ""
-                    minutes = 0L
-                }
-            }) {
-                Text("추가")
-            }
-        }
-
-        LazyColumn(modifier = Modifier.fillMaxHeight(0.5f)) {
-            itemsIndexed(vm.subjects) { index, subject ->
-                Text("${index+1}. ${subject.name} - ${subject.durationSec/60}분")
-            }
-        }
-
-        Text("현재 과목: ${if (vm.currentIndex < vm.subjects.size) vm.subjects[vm.currentIndex].name else "없음"}")
-        Text("남은 시간: ${formatSec(vm.remainingSec)}")
-        if (vm.isPreparing) {
-            Text("다음 과목 준비 중")
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { if (vm.isRunning) vm.pauseTimer() else vm.startTimer() }) {
-                Text(if (vm.isRunning) "일시정지" else "시작")
-            }
-            Button(onClick = { vm.nextSubject() }) {
-                Text("다음 과목")
-            }
-            Button(onClick = { vm.stopTimer() }) {
-                Text("스톱")
-            }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { new -> if (new.all { it.isDigit() } || new.isEmpty()) text = new },
+            label = { Text("일일 목표(분)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(onClick = {
+            val min = text.toLongOrNull() ?: 0L
+            onSetGoalMin(min)
+        }) {
+            Text("목표 설정")
         }
     }
 }
 
+@Composable
+fun TimeInfoSection(totalSec: Long, focusedSec: Long) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("총 공부 시간: ${formatSec(totalSec)}")
+        Text("순공부 시간: ${formatSec(focusedSec)}")
+    }
+}
+
+@Composable
+fun ProgressSection(focusedSec: Long, goalSec: Long) {
+    val progress = if (goalSec <= 0L) 0f else (focusedSec.toFloat() / goalSec.toFloat()).coerceIn(0f, 1f)
+    Column {
+        LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth().height(8.dp))
+        Text("진행률: ${(progress*100).toInt()}%  (${formatSec(focusedSec)} / ${formatSec(goalSec)})")
+    }
+}
+
+@Composable
+fun ControlButtons(
+    isRunning: Boolean,
+    isFocused: Boolean,
+    onStartPause: () -> Unit,
+    onToggleFocus: () -> Unit,
+    onReset: () -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = onStartPause, modifier = Modifier.weight(1f)) {
+            Text(if (isRunning) "일시정지" else "시작")
+        }
+        Button(onClick = onToggleFocus, modifier = Modifier.weight(1f)) {
+            Text(if (isFocused) "집중 종료" else "집중 시작")
+        }
+        OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) {
+            Text("초기화")
+        }
+    }
+}
+
+@Composable
+fun SuggestionBox(focusedSec: Long, goalSec: Long) {
+    val remaining = (goalSec - focusedSec).coerceAtLeast(0L)
+    Text(
+        if (remaining <= 0L) "목표를 달성했습니다" else "남은 집중 시간: ${formatSec(remaining)}"
+    )
+}
+
 fun formatSec(sec: Long): String {
-    val m = sec / 60
-    val s = sec % 60
-    return String.format("%02d분 %02d초", m, s)
+    val h = sec / 3600L
+    val m = (sec % 3600L) / 60L
+    val s = sec % 60L
+    return if (h>0) String.format("%02dh %02dm %02ds", h, m, s) else String.format("%02dm %02ds", m, s)
+}
+
+@Preview(showBackground = true)
+@Composable
+fun StudyAppPreview() {
+    StudyApp(vm = StudyViewModel())
 }
