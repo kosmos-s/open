@@ -52,3 +52,13 @@
 ## 🎨 스크린샷
 
 <img width="281" height="718" alt="image" src="https://github.com/user-attachments/assets/453f7f56-341a-406a-9180-0a34f6532e2a" />
+
+## 소스에서 실행하고 검증하기
+
+Android Studio에서 `.` 폴더를 엽니다. 포함된 모듈은 `app`입니다. SDK와 플러그인 버전은 각 모듈의 `build.gradle.kts` 및 `gradle/libs.versions.toml`을 따릅니다.
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest
+```
+
+macOS/Linux에서는 `./gradlew`를 사용합니다. 이 명령은 로컬 단위 테스트만 실행합니다. 기본 `ExampleUnitTest`의 산술 검사 통과는 화면·기능 검증을 의미하지 않습니다. 기기·에뮬레이터에서는 각 모듈의 `connectedDebugAndroidTest`와 실제 사용 흐름을 별도로 확인하세요. SDK 경로가 담긴 `local.properties`와 빌드 결과는 커밋하지 않습니다. Windows에서는 한글·공백 없는 경로에서 빌드하는 것을 권장합니다.
